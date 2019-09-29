@@ -128,8 +128,8 @@ print(y_test_t_org[0:15])
 
 # Visualiseer de voorspelling
 plt.figure()
-plt.plot(y_predict_org)
-plt.plot(y_test_t_org)
+plt.plot(y_predict_org[1350:])
+plt.plot(y_test_t_org[1350:])
 plt.title('Voorspelling vs Echte waarde')
 plt.ylabel('Prijs')
 plt.xlabel('Dagen')
