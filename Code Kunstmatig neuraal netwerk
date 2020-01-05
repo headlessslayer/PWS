@@ -14,15 +14,16 @@ from keras import optimizers
 
 parameters = {
     "batch_size": 20,
-    "epochs": 10,
+    "epochs": 20,   #20
     "lr": 0.0000100,
-    "time_steps":30       #/30/60 goede waardes
+    "time_steps":20      #/30/60 goede waardes
 }
 
 INPUT_PATH = "/content/" #Het pad waar je datasets in zitten
+df_stock = pd.read_csv(os.path.join(INPUT_PATH,'ge.us.txt'))
+
 TIME_STEPS = parameters["time_steps"]
 BATCH_SIZE = parameters["batch_size"]
-
 
 def trim_dataset(matrix,batch_size):
     #Trimt een dataset tot een grootte dat deelbaar is door BATCH_SIZE
@@ -34,15 +35,6 @@ def trim_dataset(matrix,batch_size):
 
 
 def build_timeseries(matrix, y_col_index):
-    """
-    Transformeert ndarray in een timeseries format en supervised data format.
-    Neemt TIME_STEPS rijnummer als input en zet de TIME_STEPS+1ste data als samenhangend output
-    
-    parameter matrix;      nndarray dat de dataset bevat
-    parameter y_col_index; Index van kolom dat werkt als output
-    return;                Returns twee ndarrays; Een input en een output in een format 
-                           dat kan worden gebruikt door het LSTM
-    """
     # Hoeveelheid time-series samples = len(matrix) - TIME_STEPS
     d0 = matrix.shape[0] - TIME_STEPS
     d1 = matrix.shape[1]
@@ -52,32 +44,27 @@ def build_timeseries(matrix, y_col_index):
     for i in tqdm_notebook(range(d0)):
         x[i] = matrix[i:TIME_STEPS+i]
         y[i] = matrix[TIME_STEPS+i, y_col_index]
-    print("lengte van timeseries input/output",x.shape,y.shape)
+    print("Vorm van timeseries input en output",x.shape,y.shape,"\n\n\n")
     return x, y
 
-df_stock = pd.read_csv(os.path.join(INPUT_PATH,'ge.us.txt'))
-'''
-Weergeef informatie over de dataset
-print(df_stock.shape)
-print(df_stock.columns)
-display(df_stock.head(5))
-print(df_stock.dtypes)
-'''
+
 train_columns = ["Open","High","Low","Close","Volume"]
+#De training size bevat de eerste 80% van het gehele bestand, en de test size de laatste 20%
 df_train, df_test = train_test_split(df_stock, train_size=0.8, test_size=0.2, shuffle=False)
 print("Train en Test aantallen samples", len(df_train), len(df_test))
 
 # scale the feature MinMax, build array
-x = df_train.loc[:,train_columns].values
-min_max_scaler = MinMaxScaler()
-x_train = min_max_scaler.fit_transform(x)
-x_test = min_max_scaler.transform(df_test.loc[:,train_columns])
 
-print("Zijn er missende waardes in de train of test matrices?",np.isnan(x_train).any(), np.isnan(x_train).any())
+scaler = MinMaxScaler()
+x_train = scaler.fit_transform(df_train.loc[:,train_columns].values)
+x_test = scaler.transform(df_test.loc[:,train_columns])
+
+print("Zijn er missende waardes in de train of test matrices?",np.isnan(x_train).any(), np.isnan(x_test).any())
+
 x_t, y_t = build_timeseries(x_train, 3)
 x_t = trim_dataset(x_t, BATCH_SIZE)
 y_t = trim_dataset(y_t, BATCH_SIZE)
-print("grootte na trim",x_t.shape, y_t.shape)
+print("Train gedeelte grootte na trim",x_t.shape, y_t.shape)
 
 model = Sequential()
 
@@ -93,13 +80,13 @@ optimizer = optimizers.RMSprop(lr=parameters["lr"])
 model.compile(loss='mean_squared_error', optimizer=optimizer)
 
 x_temp, y_temp = build_timeseries(x_test, 3)
-x_value, x_test_t = np.split(trim_dataset(x_temp, BATCH_SIZE),2)
-y_value, y_test_t = np.split(trim_dataset(y_temp, BATCH_SIZE),2)
-print("Test size", x_test_t.shape, y_test_t.shape, x_value.shape, y_value.shape)
+x_val, x_test_t = np.split(trim_dataset(x_temp, BATCH_SIZE),2)
+y_val, y_test_t = np.split(trim_dataset(y_temp, BATCH_SIZE),2)
+print("Test size", x_test_t.shape, y_test_t.shape, x_val.shape, y_val.shape)
     
 history = model.fit(x_t, y_t, epochs=parameters["epochs"], verbose=2, batch_size=BATCH_SIZE,
-                    shuffle=False, validation_data=(trim_dataset(x_value, BATCH_SIZE),
-                    trim_dataset(y_value, BATCH_SIZE)))
+                    shuffle=False, validation_data=(trim_dataset(x_val, BATCH_SIZE),
+                    trim_dataset(y_val, BATCH_SIZE)))
 
 # Visualiseer de training data
 plt.figure()
@@ -108,30 +95,57 @@ plt.plot(history.history['val_loss'])
 plt.title('Model loss')
 plt.ylabel('Loss')
 plt.xlabel('Epoch')
-plt.legend(['Training Data', 'Test Data'])
+plt.legend(['Train', 'Validation'])
 plt.show()
+
 
 #Voorspel de test data
 y_predict = model.predict(trim_dataset(x_test_t, BATCH_SIZE), batch_size=BATCH_SIZE)
 y_predict = y_predict.flatten()
 y_test_t = trim_dataset(y_test_t, BATCH_SIZE)
+
+
+'''
+Extra metingen
+Fout van de test dataset
 error = mean_squared_error(y_test_t, y_predict)
 print("Error is", error, y_predict.shape, y_test_t.shape)
-print(y_predict[0:15])
-print(y_test_t[0:15])
+print(y_predict[:])
+print(y_test_t[:])
+'''
+
 
 # Transformeer de voorspelde waarde in een range van de echte data
-y_predict_org = (y_predict * min_max_scaler.data_range_[3]) + min_max_scaler.data_min_[3] 
-y_test_t_org = (y_test_t * min_max_scaler.data_range_[3]) + min_max_scaler.data_min_[3] 
-print(y_predict_org[0:15])
-print(y_test_t_org[0:15])
+y_predict_org = (y_predict * scaler.data_range_[3]) + scaler.data_min_[3] 
+y_test_t_org = (y_test_t * scaler.data_range_[3]) + scaler.data_min_[3] 
+'''
+Extra metingen
+teruggetransformeerde waardes aan de hand van de transformatie die eerder plaatsvondt
+
+print(y_predict_org[0:])
+print(y_test_t_org[0:])
+'''
+
 
 # Visualiseer de voorspelling
 plt.figure()
-plt.plot(y_predict_org[1350:])
-plt.plot(y_test_t_org[1350:])
+plt.plot(y_predict_org[:])
+plt.plot(y_test_t_org[:])
 plt.title('Voorspelling vs Echte waarde')
 plt.ylabel('Prijs')
 plt.xlabel('Dagen')
 plt.legend(['Voorspelling', 'Echt'])
 plt.show()
+
+
+# Visualiseer het verschil
+difference = y_predict_org - y_test_t_org
+plt.figure()
+
+plt.plot(difference)
+plt.title('Voorspelling verschil met werkelijke prijs')
+plt.ylabel('Prijs')
+plt.xlabel('Dagen')
+plt.legend(['Verschil met de werkelijke prijs'])
+plt.show()
+
